@@ -1,0 +1,237 @@
+# =============================================================================
+# OmniFold Measurement Metadata Specification
+# Author: Sharon — GSoC 2026 Applicant
+# Target: ATLAS Z+jets 24-Dimensional Differential Cross-Section (Pseudodata)
+#
+# This file provides the full context needed to reuse the raw OmniFold HDF5 
+# per-event weights. Without this metadata, the weights are just numbers. With 
+# it, they become a reproducible, extensible, and rigorous scientific product.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. High-Level Record Identity
+# ---------------------------------------------------------------------------
+record:
+  title: "ATLAS OmniFold Z+jets 24-Dimensional Differential Cross-Section — Pseudodata"
+  description: >
+    Per-event OmniFold particle-level weights for an unbinned, 24-dimensional
+    differential cross-section measurement of inclusive Z→μμ + jets production 
+    at the LHC. Instead of traditional binned histograms, this package provides 
+    the full continuous kinematics. To extract any observable, one simply 
+    histograms the MC events weighted by the provided 'weights' column.
+    
+    This specific dataset is pseudo-data, meaning it mimics a real ATLAS 
+    measurement by reweighting a validation MC sample (both truth- and 
+    reco-level) to match the real observed data.
+  
+  experiment: "ATLAS"
+  collision_system: "pp"
+  center_of_mass_energy_TeV: 13.0
+  
+  # For pseudo-data (MC-based validation), integrated luminosity isn't physically 
+  # meaningful in the same way as collision data, but we explicitly flag it as null 
+  # here rather than omitting it to prevent users from guessing.
+  luminosity_fb_inv: null          
+  
+  reference_paper: "https://arxiv.org/abs/CERN-EP-2024-132"
+  zenodo_doi: "10.5281/zenodo.11507450"
+  created_date: "2024-06-06"
+  
+  # Crucial for long-term archival. Future versions of this schema will remain 
+  # compatible or provide migration scripts based on this version string.
+  schema_version: "1.0.0"
+
+# ---------------------------------------------------------------------------
+# 2. File Manifest: Nominal Result and Systematic Variations
+# ---------------------------------------------------------------------------
+files:
+  nominal:
+    filename: "multifold.h5"
+    role: "nominal"
+    description: >
+      The central, nominal OmniFold result. This was unfolded using MG5_aMC@NLO 
+      (MadGraph5) as the primary simulation sample. When quoting a central value, 
+      these are the weights to use.
+    generator:
+      name: "MG5_aMC@NLO"
+      version: "2.9.x"
+      tune: "A14"
+      pdf_set: "NNPDF3.0nlo"
+    weight_column: "weights"
+    weight_type: "omnifold_step2"
+
+  systematics:
+    - filename: "multifold_sherpa.h5"
+      role: "systematic"
+      systematic_type: "generator_variation"
+      label: "sherpa"
+      description: >
+        Provides weights computed using Sherpa 2.2 as the underlying simulation 
+        instead of MadGraph5. Used to quantify the generator modeling systematic 
+        uncertainty. One should compare the histogram of these weights against 
+        the nominal to construct an uncertainty band.
+      generator:
+        name: "Sherpa"
+        version: "2.2.x"
+        tune: "Default"
+        pdf_set: "NNPDF3.0nlo"
+      weight_column: "weights"
+      weight_type: "omnifold_step2"
+
+    - filename: "multifold_nonDY.h5"
+      role: "systematic"
+      systematic_type: "sample_composition"
+      label: "nonDY"
+      description: >
+        Alternative sample composition uncertainty. Includes electroweak Zjj/VBF 
+        and diboson processes overlaid on the inclusive Drell-Yan Z+jets sample. 
+        Differences from the nominal evaluate the uncertainty from non-DY 
+        background modeling.
+      generator:
+        name: "MG5_aMC@NLO"
+        version: "2.9.x"
+        tune: "A14"
+        pdf_set: "NNPDF3.0nlo"
+      additional_processes:
+        - "EW Zjj / VBF Z"
+        - "Diboson (WW, WZ, ZZ)"
+      weight_column: "weights"
+      weight_type: "omnifold_step2"
+
+# ---------------------------------------------------------------------------
+# 3. OmniFold Weight Specification
+# ---------------------------------------------------------------------------
+weights:
+  column_name: "weights"
+  algorithm: "OmniFold"
+  algorithm_reference: "https://arxiv.org/abs/1911.09107"
+  
+  # Step 1 weights map reco MC -> real Data. Step 2 weights map truth MC -> 
+  # unfolded Truth. This explicit flag prevents applying Step 2 weights to 
+  # reconstructed quantities by accident.
+  algorithm_step: "step2"
+  
+  description: >
+    Per-event particle-level OmniFold weights. Applying these to the MC truth 
+    events produces distributions that closely match the true (unfolded) data.
+  
+  normalization:
+    convention: "sum_to_N_events"
+    description: >
+      The weights are normalized such that the sum of all weights across the 
+      file exactly equals the total number of generated events in the MC sample. 
+      To extract a physical differential cross section (in pb or fb), one must 
+      multiply by (MC_Cross_Section / N_Events).
+      
+  n_iterations: 5
+  expected_range: [0.0, 50.0]
+  negative_weights_possible: false
+
+# ---------------------------------------------------------------------------
+# 4. Phase Space / Fiducial Region
+# ---------------------------------------------------------------------------
+# An unfolding is meaningless without knowing what events are allowed in it.
+fiducial_region:
+  description: >
+    The particle-level fiducial phase space restrictions. If a user applying 
+    these weights forgets to apply these cuts to their own MC, their total 
+    cross section will be drastically mismatched.
+  cuts:
+    - variable: "mumu_pt"
+      operator: ">"
+      value: 200
+      unit: "GeV"
+      description: "Boosted Z boson regime cut (primary analysis threshold)"
+    - variable: "mu1_pt and mu2_pt"
+      operator: ">"
+      value: 27
+      unit: "GeV"
+      description: "Muon pT trigger threshold restrictions (dressed muons)"
+    - variable: "mu1_eta and mu2_eta"
+      operator: "in"
+      value: "|η| < 2.47 (excluding 1.37 < |η| < 1.52)"
+      description: "Standard ATLAS muon spectrometer acceptance"
+    - variable: "mumu_mass"
+      operator: "in"
+      value: "[76, 106] GeV"
+      description: "Standard Z boson mass window"
+  
+  handling_zero_jets: 
+    included: true
+    description: "Events with 0 or 1 reconstructed jet are included, but their respective jet kinematics columns are assigned -999 (NaN sentinel)."
+
+# ---------------------------------------------------------------------------
+# 5. Observable Definitions
+# ---------------------------------------------------------------------------
+# Explicitly stating units ensures interoperability. Without this, GeV vs MeV 
+# confusion ruins downstream reanalysis.
+observables:
+  global_units: "GeV"
+  coordinate_system: "ATLAS standard (η, φ, pT)"
+
+  muon_kinematics:
+    description: "Properties of the two leading muons from the Z boson decay."
+    columns:
+      mu1_pt: { label: "Leading Muon pT", symbol: "p_T^{μ1}", unit: "GeV" }
+      mu1_eta: { label: "Leading Muon η", symbol: "η^{μ1}", unit: "dimensionless" }
+      mu1_phi: { label: "Leading Muon φ", symbol: "φ^{μ1}", unit: "radians" }
+      mu2_pt: { label: "Sub-leading Muon pT", symbol: "p_T^{μ2}", unit: "GeV" }
+      mu2_eta: { label: "Sub-leading Muon η", symbol: "η^{μ2}", unit: "dimensionless" }
+      mu2_phi: { label: "Sub-leading Muon φ", symbol: "φ^{μ2}", unit: "radians" }
+
+  dimuon_kinematics:
+    description: "Reconstructed properties of the parent Z system."
+    columns:
+      mumu_pt: { label: "Dimuon pT", symbol: "p_T^{μμ}", unit: "GeV" }
+      mumu_y: { label: "Dimuon Rapidity", symbol: "y^{μμ}", unit: "dimensionless" }
+
+  jet_kinematics:
+    description: "Leading and sub-leading anti-kT R=0.4 charged-particle jets."
+    columns:
+      jet1_pt: { label: "Leading Jet pT", symbol: "p_T^{j1}", unit: "GeV" }
+      jet1_y: { label: "Leading Jet Rapidity", symbol: "y^{j1}", unit: "dimensionless" }
+      jet1_phi: { label: "Leading Jet φ", symbol: "φ^{j1}", unit: "radians" }
+      jet1_m: { label: "Leading Jet Mass", symbol: "m^{j1}", unit: "GeV" }
+      jet2_pt: { label: "Sub-leading Jet pT", symbol: "p_T^{j2}", unit: "GeV" }
+      jet2_y: { label: "Sub-leading Jet Rapidity", symbol: "y^{j2}", unit: "dimensionless" }
+      jet2_phi: { label: "Sub-leading Jet φ", symbol: "φ^{j2}", unit: "radians" }
+      jet2_m: { label: "Sub-leading Jet Mass", symbol: "m^{j2}", unit: "GeV" }
+
+  jet_substructure:
+    description: "N-constituents and N-subjettiness for the defined jets."
+    columns:
+      jet1_nconst: { label: "Jet 1 charged constituents count", symbol: "n_{const}^{j1}", unit: "count" }
+      jet1_tau1: { label: "Jet 1 N-subjettiness τ₁", symbol: "τ_1^{j1}", unit: "dimensionless" }
+      jet1_tau2: { label: "Jet 1 N-subjettiness τ₂", symbol: "τ_2^{j1}", unit: "dimensionless" }
+      jet1_tau3: { label: "Jet 1 N-subjettiness τ₃", symbol: "τ_3^{j1}", unit: "dimensionless" }
+      jet2_nconst: { label: "Jet 2 charged constituents count", symbol: "n_{const}^{j2}", unit: "count" }
+      jet2_tau1: { label: "Jet 2 N-subjettiness τ₁", symbol: "τ_1^{j2}", unit: "dimensionless" }
+      jet2_tau2: { label: "Jet 2 N-subjettiness τ₂", symbol: "τ_2^{j2}", unit: "dimensionless" }
+      jet2_tau3: { label: "Jet 2 N-subjettiness τ₃", symbol: "τ_3^{j2}", unit: "dimensionless" }
+
+# ---------------------------------------------------------------------------
+# 6. Usage Examples + Reproducibility
+# ---------------------------------------------------------------------------
+usage_quickstart:
+  description: "How to quickly build the unfolded histogram with statistical errors."
+  code: |
+    import pandas as pd
+    import numpy as np
+
+    # Load nominal dataset
+    df = pd.read_hdf("multifold.h5", key="df")
+    
+    # Extract weights and observational data 
+    weights = df["weights"].values
+    obs = df["mumu_pt"].values
+    
+    # Compute base histogram and sum of squared weights (stat error)
+    counts, edges = np.histogram(obs, bins=20, range=(200, 600), weights=weights)
+    counts_sq, _ = np.histogram(obs, bins=edges, weights=weights**2)
+    stat_errors = np.sqrt(counts_sq)
+
+software_heritage:
+  omnifold_package: "https://github.com/hep-lbdl/OmniFold"
+  neural_network_backend: "TensorFlow / Keras"
+  architecture: "3-layer Dense MLP (100 nodes/layer), ReLU activations"
+  data_container: "HDF5 via Python Pandas (PyTables/h5py, format='fixed')"
